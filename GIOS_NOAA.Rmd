@@ -1,0 +1,1492 @@
+---
+title: 'Przetwarzanie Danych Środowiskowych - Analiza danych jakości powietrza z bazy danych GIOS i danych meteo z bazy ISD NOAA'
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    theme: darkly
+    highlight: zenburn
+    toc: yes
+    toc_float: yes
+    collapsed: no
+    smooth_scroll: no
+    number_sections: no
+    toc_depth: 3
+    self_contained: yes
+    code_folding: null
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setwd_projektu, include = FALSE, eval=FALSE}
+
+setwd("D:/Biblioteka rzeczy na studia/IV Semestr/Przetwarzanie danych środowiskowych/Mateusz Rzeszutek, dr inż/Projekt")
+getwd()
+
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = F, message = F, error = F, fig.align = "center", cache = T)
+```
+
+```{=html}
+<style type="text/css"> 
+body  { 
+  font-size: 14px; 
+  text-align: justify;
+  font-family: "Open Sans", "Helvetica";
+} 
+code.r{
+  font-size: 12px;
+} 
+h1    { 
+  font-size: 22px;
+} 
+h2    { 
+  font-size: 20px;
+} 
+h3    { 
+  font-size: 18px;
+}
+h4    {
+  font-size: 16px;
+  font-weight: bold;
+}
+th    { 
+  font-size: 12px;
+}
+td    { 
+  font-size: 11px; 
+}
+blockquote {
+  font-size: 14px;
+  background: #f9f9f9;
+  border-left: 10px solid #ccc;
+  margin: 1.5em 10px;
+  padding: 0.5em 10px;
+}
+
+</style>
+```
+
+------------------------------------------------------------------------
+
+**Uczelnia:** *Akademia Górniczo-Hutnicza im. Stanisława Staszica w Krakowie*
+
+**Wydział:** *Wydział Geodezji Górniczej i Inżynierii Środowiska*
+
+**Kierunek:** *Geoinformacja*
+
+**Rok:** *drugi*
+
+**Semestr:** *czwarty*
+
+**Przedmiot:** *Przetwarzanie Danych Środowiskowych*
+
+**Prowadzacy:** *dr inż. Mateusz Rzeszutek*
+
+**Autorzy:**
+
+-   Tymoteusz Maj, 401370, [tymoteuszmaj\@student.agh.edu.pl](tymoteuszmaj@student.agh.edu.pl)
+
+-   Hubert Dębowski, 407955, [hdebowski\@student.agh.edu.pl](hdebowski@student.agh.edu.pl)
+
+-   <div>
+
+    -   <div>
+
+        ![](D:/Biblioteka%20rzeczy%20na%20studia/IV%20Semestr/Przetwarzanie%20danych%20%C5%9Brodowiskowych/Mateusz%20Rzeszutek,%20dr%20in%C5%BC/Projekt/Obrazy/logowggiis.svg){width="397"}
+
+        </div>
+
+    </div>
+
+```{r zaladowanie_pakietów, include=FALSE, eval=TRUE, message=FALSE, error=FALSE, warning=FALSE}
+
+#Wczytanie wszystkich Bibliotek uzytych w projekcie
+
+
+if(!require(devtools)) {install.packages("devtools"); require(devtools)}
+if (!require(fpp3))     {install.packages("fpp3");     require(fpp3)}
+if (!require(ggplot2))  {install.packages("ggplot2");  require(ggplot2)}
+if (!require(GGally))   {install.packages("GGally");  require(GGally)}
+devtools::install_github("mrzeszut/giosimport")
+
+library(base)
+library(boot)
+library(corrplot)
+library(data.table)
+library(datasets)
+library(devtools)
+library(dplyr)
+library(DT)
+library(feasts)
+library(forecast)
+library(fpp2)
+library(fpp3)
+library(future)
+library(future.apply)
+library(ggplot2)
+library(ggpubr)
+library(giosimport)
+library(grDevices)
+library(gridExtra)
+library(igraph)
+library(janitor)
+library(leaflet)
+library(lubridate)
+library(methods)
+library(openair)
+library(openxlsx)
+library(olsrr)
+library(parallel)
+library(pastecs)
+library(purrr)
+library(raster)
+library(revgeo)
+library(rgdal)
+library(Rmisc)
+library(seasonal)
+library(seasonalview)
+library(sf)
+library(sp)
+library(spDataLarge)
+library(stringr)
+library(tibble)
+library(tidyr)
+library(tidyverse)
+library(tsibble)
+library(utils)
+library(worldmet)
+
+```
+
+------------------------------------------------------------------------
+
+# 1. Cel
+
+------------------------------------------------------------------------
+
+Celem wykonania przedmiotowego projektu jest zapoznanie się studentów Geoinformacji (Informatyki Geoprzestrzennej) o przetwarzaniu danych jakości powietrza z danych **GIOS** (które pobraliśmy przy skorzystaniu z pakietu **giosimport**), oraz sprawdzenie ich korealacji z zjawiskami pogodowymi z bazdy **ISD NOAA**, w celu prognozowania zanieczyszczeń w najbliższej przyszłości. Aby prawidłowo wykonac zlecone nam zadanie musielismy zapoznac sie z formatem danych, poznać narzędzia które ułatwią nam pracę oraz ich przetwarzanie. Musieliśmy dokonać analizy statystycznej danych aby okreslic panujące trendy oraz w celu zauważenia zależności między poszczególnymi danymi. Ostatnim aspektem naszej pracy, było napisanie sprawozdania technicznego z wykonanengo przez nas ćwiczenia przy pomocy RMarkdown, w celu udokumentowania naszej pracy w języku R.
+
+------------------------------------------------------------------------
+
+# 2. Technologie wykorzystane w analizie
+
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+
+## 2.1. R (język programowania)
+
+------------------------------------------------------------------------
+
+**R** - interpretowany jezyk programowania oraz srodowisko do obliczen statystycznych. Stosowany jest w analizie szeroko rozumianych danych środowiskowych i przestrzennych oraz ich wizualizacji. Podobny jest do języka i środowiska S stworzonego w Bell Laboratories przez Johna Chambersa i jego współpracowników. R jako implementacja języka S została stworzona przez Roberta Gentlemana i Rossa Ihakę na uniwersytecie w Auckland. Nadaje się on świetnie do interaktywnej pracy z danymi, ponieważ połączono w nim wybrane cechy języków funkcyjnych oraz obiektowych.
+
+[*Źródlo*](https://pl.wikipedia.org/wiki/R_(język_programowania))
+
+------------------------------------------------------------------------
+
+## 2.2. R Markdown
+
+------------------------------------------------------------------------
+
+**R Markdown** - jest formatem pliku stworzonym do sporzadzania dynamicznych dokumentow z wykorzystaniem R. Plik typu Markdown jest pisany w specyficzny dla siebie sposob, który zaklada bardzo latwa edycje tekstu oraz implementowanie w nim fragmentow kodu (chunki zawierajace kod z poleceniami w jezyku R). R Markdown jest bardzo wygodna metoda formatowania plikow HTML, PDF i dokumentow MS Word.
+
+[*Źródlo*](https://rmarkdown.rstudio.com/articles_intro.html)
+
+------------------------------------------------------------------------
+
+## 2.3. giosimport
+
+------------------------------------------------------------------------
+
+Celem pakietu giosimport jest pobieranie i wczytywanie danych z Portal Jakości Powietrza GIOŚ. Teoretycznie dane te mają jednorodną strukturę i ich wczytanie powinno być dość proste. Niestety w tych danych wielokrotnie pojawiają się różnego rodzaju nieścisłości, które uniemożliwiały stosowanie prostych i przejrzystych rozwiązań. Kod projektu stawał się bardzo długi, a spora jego część skupiała się na pozyskaniu danych i przekonwertowaniu ich do wygodnej formy pracy.
+
+Funkcje zawarte w pakiecie tworzą plikową bazę danych na dysku lokalnym. Cała baza danych może zajmować prawie 700 MB. Istnieje możliwość pobierania tylko wybranych części plikowej bazy danych. W tym przypadku dane są pobierane dla każdego roku oddzielnie. Dostępne dane historyczne nie są aktualizowane, więc wystarczy je pobrać tylko raz. Warto umieścić je w odpowiedniej lokalizacji, by nie powielać pobierania danych.
+
+[*Źródlo - Zadanie Projektowe*](https://github.com/mrzeszut/giosimporte)
+
+------------------------------------------------------------------------
+
+## 2.4 Baza ISD NOAA
+
+------------------------------------------------------------------------
+
+Baza [ISD NOAA](https://www.ncdc.noaa.gov/isd) (Integrated Surface Database of the National Oceanic and Atmosferic Administration) jest obecnie jednym z największych zbiorów bezpłatnie udostępnianych meteorologicznych danych pomiarowych. Zawiera ona obserwacje uśredniane w czasie jednej godziny dla 12826 naziemnych punktów pomiarowych.
+
+Pomiary meteorologiczne w formacie ASCII udostępniane są bezpłatnie przez serwer [FTP](ftp://ftp.ncdc.noaa.gov/pub/data/noaa), jednak pobieranie ich w sposób bezpośredni jest żmudne i pracochłonne. Format w jakim są przechowywane dane wymaga dodatkowego przetworzenia, aby możliwa była ich swobodna analiza.
+
+Dane pomiarowe z bazy ISD NOAA przechowywane są za pomocą znaków ASCII w plikach formatu ISH (Integrated Surface Hourly - Compressed Archive). Informacje dotyczące tego, jakie zmienne i w jakich jednostkach są udostępniane znajdują się w szczegółowej [dokumentacji formatu](ftp://ftp.ncdc.noaa.gov/pub/data/ish/ish-format-document.pdf). Wartość każdej z dostępnych zmiennych zajmuje określone pozycje w rekordzie pliku, tak więc bez znajomości jego dokładnej struktury każda linijka jest tylko zakodowanym rzędem cyfr i liter. Poza 34 zmiennymi, które są obligatoryjne, czasem znajdziemy również dodatkowe informacje w pliku. Wśród najważniejszych zmiennych możemy wyróżnić wartości wybranych pomiarów meteorologicznych, informacje dotyczące stacji i źródła obserwacji, a także wyniki testów jakości dla poszczególnych serii pomiarowych.
+
+[*Źródlo - Zadanie Projektowe*](https://rstudio-pubs-static.s3.amazonaws.com/579343_ee4609d7ebca4217a0530fdc7eadad9c.html#wprowadzenie)
+
+------------------------------------------------------------------------
+
+## 2.5. Portal Jakość Powietrza GIOŚ
+
+------------------------------------------------------------------------
+
+Inspekcja Ochrony Środowiska jest powołana do kontroli przestrzegania przepisów o ochronie środowiska oraz badania i oceny stanu środowiska. W skład Inspekcji wchodzą: Główny Inspektorat Ochrony Środowiska (GIOŚ) oraz 16 wojewódzkich inspektoratów ochrony środowiska. Działalnością Inspekcji kieruje Główny Inspektor Ochrony Środowiska
+
+Monitoring jakości powietrza w ramach Państwowego Monitoringu Środowiska (PMŚ) koordynowany i prowadzony jest zgodnie z ustawą z dnia 10 lipca 1991 r. o Inspekcji Ochrony Środowiska przez Głównego Inspektora Ochrony Środowiska.
+
+Monitoring jakości powietrza obejmuje zadania związane z badaniem i oceną stanu zanieczyszczenia powietrza, w tym pomiary i oceny jakości powietrza w strefach, monitoring tła miejskiego pod kątem WWA, pomiary stanu zanieczyszczenia powietrza pyłem PM2,5 dla potrzeb monitorowania procesu osiągania krajowego celu redukcji narażenia, pomiary stanu zanieczyszczenia powietrza metalami ciężkimi i WWA oraz rtęcią w stanie gazowym na stacjach monitoringu tła regionalnego, pomiary składu chemicznego pyłu PM2,5, monitoring prekursorów ozonu; programy badawcze dotyczące zjawisk globalnych i kontynentalnych wynikające z podpisanych przez Polskę konwencji ekologicznych.
+
+Celem funkcjonowania monitoringu jakości powietrza, zgodnie z art. 23 ust. 11 pkt 1 ustawy z dnia 20 lipca 1991 r. o Inspekcji Ochrony Środowiska, jest uzyskiwanie informacji i danych dotyczących poziomów substancji w otaczającym powietrzu oraz wyników analiz i ocen w zakresie przestrzegania norm jakości powietrza.
+
+[*Źródlo*](https://powietrze.gios.gov.pl/pjp/content/about_us)
+
+------------------------------------------------------------------------
+
+## 2.6. Metody pomiaru zanieczyszczenia powietrza
+
+------------------------------------------------------------------------
+
+Inspekcja Ochrony Środowiska bada zawartość pyłu zawieszonego PM10 i PM2,5 w powietrzu stosując dwie uzupełniające się metody:
+
+-   metodę grawimetryczną (referencyjną), która jest uznana i stosowana na świecie jako najbardziej precyzyjna metoda pomiaru;
+
+-   metodę automatyczną, posiadającą wykazaną równoważność do metody referencyjnej.
+
+------------------------------------------------------------------------
+
+### 2.6.1. Metoda grawimetryczna
+
+------------------------------------------------------------------------
+
+W tej metodzie używa się tzw. poborników pyłowych, specjalnych urządzeń, do których zasysane jest powietrze atmosferyczne. Co dwa tygodnie do pobornika zakłada się 14 jednorazowych filtrów, które urządzenie zmienia automatycznie co 24 godziny. Każdy filtr posiada swój niepowtarzalny numer identyfikacyjny.
+
+Filtry czyste, przed założeniem do pobornika są kondycjonowane i ważone w laboratorium, umieszczane w specjalnych pojemnikach do transportu, a następnie transportowane na stację pomiarową i umieszczane w poborniku. Po 14 dniach wszystkie filtry są wyjmowane, umieszczane w specjalnych pojemnikach do transportu i przewożone do laboratorium. W laboratorium filtry są kondycjonowane i ważone po raz drugi, już jako filtry po tzw. ekspozycji. Z różnic mas przed i po ekspozycji filtra, odniesionych do objętości przepływu powietrza w poborniku, wyliczane są stężenia pyłów. Stężania te podawane są w mikrogramach na metr sześcienny [µg/m3].
+
+Zaletą tej metody pomiarowej jest jej bardzo wysoka dokładność. Jedyną jej wadą jest czas potrzebny na uzyskanie wyników, który wynosi ok. 3 tygodni.
+
+Taką metodą w Polsce, Europie, czy Stanach Zjednoczonych, mierzy się stężenia pyłu zawieszonego. Filtry uzyskane z poborników pyłowych wykorzystywane są również do oznaczania metali ciężkichi wielopierścieniowych węglowodorów aromatycznych, w tym benzo(a)pirenu.
+
+Obecnie w Polsce pomiary metodą grawimetryczną są prowadzone na ok. 180 stanowiskach pyłu PM10 i ok. 70 stanowiskach pyłu PM2,5.
+
+------------------------------------------------------------------------
+
+### 2.6.2. Metoda automatycza
+
+------------------------------------------------------------------------
+
+Aby urządzenie do automatycznych pomiarów pyłu zawieszonego dopuszczone zostało do pomiarów, które wykorzystywane będą do celów oceny jakości powietrza, stosowana przez nie metoda pomiarowa musi zostać uznana za metodę równoważną do metodyki referencyjnej. W takim wypadku należy wykazać, iż urządzenie spełnia wymagania równoważności, a wyniki takich badań muszą zostać przedstawione Komisji Europejskiej i zaakceptowane przez nią.
+
+Do pomiarów wykonywanych w ramach Państwowego Monitoringu Środowiska stosuje się mierniki automatyczne, które posiadają certyfikaty potwierdzające ich równoważność z metodą referencyjną. Mierniki te na bieżąco mierzą stężenia pyłu, co umożliwia pokazywanie wyników tych pomiarów w trybie „on-line" na portalach inspekcji ochrony środowiska (GIOŚ i WIOŚ) i w aplikacji GIOŚ „Jakość powietrza w Polsce". Dane te są aktualizowane co godzinę i, w celu porównania z poziomem dopuszczalnym, przeliczane na wartości średniodobowe.
+
+Obecnie w Polsce pomiary metodą automatyczną są prowadzone na ok. 135 stanowiskach pyłu PM10 i 45 stanowiskach pyłu PM2,5.
+
+Dane pozyskiwane z mierników automatycznych, które są widoczne „on-line" na portalach i w aplikacji powietrznej GIOŚ, określane są jako dane „surowe", czyli takie, które nie zostały poddane weryfikacji.
+
+*[Źródlo]<https://powietrze.gios.gov.pl/pjp/content/show/1000919>)*
+
+------------------------------------------------------------------------
+
+# 3. Opis wybranej lokalizacji stacji
+
+------------------------------------------------------------------------
+
+W celu wykonania przedmiotowego ćwiczenia postanowiliśmy skorzystać z stacji znajdujących się w mieście Radom (GIOS) i jego okolicach (ISD NOAA). Podjeliśmy taką decyzję gdyż jest to miasto rodzinne dla jednego z nas, dzięki czemu ta analiza dodatkowo może być dla nas ciekawa.
+
+Radom - miasto na prawach powiatu znjadujące się w centralno-wschodniej cześci kraju. Położone jest nad rzeką Mleczną. Pomimo administracyjnej przynależności do województwa mazowieckiego pod względem historycznym, kulturowym i etnograficznym Radom wraz ze swoim regionem stanowią integralną część Małopolski.
+
+Według projektu ESPON Radom zalicza się do grona dużych miast o znaczeniu krajowym lub międzynarodowym.
+
+Miasto jest również organizatorem międzynarodowych pokazów lotniczych Radom Air Show. Międzynarodowy Festiwal Gombrowiczowski i Radomski Festiwal Jazzowy są dziś kulturową wizytówką miasta.
+
+[*Źródlo*](https://pl.wikipedia.org/wiki/Radom)
+
+![](D:/Biblioteka%20rzeczy%20na%20studia/IV%20Semestr/Przetwarzanie%20danych%20%C5%9Brodowiskowych/Mateusz%20Rzeszutek,%20dr%20in%C5%BC/Projekt/Obrazy/radom-1170x680.jpg)
+
+[*Źródlo*](https://modanamazowsze.pl/radom-art-night/)
+
+------------------------------------------------------------------------
+
+# 4. Pozyskanie danych
+
+------------------------------------------------------------------------
+
+Pozyskanie danych do wykonania projektowego ćwiczenia rozpoczęliśmy od okreslenia katalogu dostepu do którego przedmiotowe dane mają zostać zapisane. Umożliwi nam to w przyszłości opanowanie tego gdzie nasze dane są zapisywane na naszym urządzeniu. Dzięki temu w każdej chwili będziemy mieć do nich łatwy dostęp.
+
+Katalog dostępu ustawiliśmy za pomocą poniższego polecenia.
+
+```{r Katalog_dostepu, include=TRUE, eval=TRUE}
+
+kat_dost <- "D:/Biblioteka rzeczy na studia/IV Semestr/Przetwarzanie danych środowiskowych/Mateusz Rzeszutek, dr inż/Projekt/Dane"
+
+```
+
+Następnie dzięki zapisaniu ścieżki zapisu dla naszych plików mogliśmy przystąpić do pobierania przedmiotowych danych dla miasta Radom. Jednak aby prawidłowo określić jego położenie oraz dostępność stacji przyjrzyjmy się poniższej mapie:
+
+```{r Mapa-Radom, include=TRUE, eval=TRUE}
+
+getMeta(site = "", lat = 51.403611, lon = 21.156667,end.year = "current", plot = T, returnMap = T )
+
+```
+
+Dzięki niej możemy zauważyć że najbliższa stacja meteo względem naszego miasta znajduje się w miejscowości **Kozienice**, i to właśnie z stacji położonej w tej lokalizacji będziemy korzystać wykonując przedmiotowe ćwiczenie. Uważamy ze dystans dzielący te stacje jest na tyle nie wielki, że żaden błąd poimiarowy nie powinien wystąpić z tytułu zastosowania tej stacji.
+
+------------------------------------------------------------------------
+
+## 4.1. Pozyskanie danych meteo
+
+------------------------------------------------------------------------
+
+Możemy z łatwością odczytać kod stacji meteo : 124880-99999. To właśnie przy jego pomocy pozyskamy teraz dane meteo dla tej stacji.
+
+```{r Pozyskanie_danych_meteo, include=TRUE, eval=TRUE}
+
+dane <- importNOAA(code = "124880-99999", year = 2000:2019)
+
+```
+
+Wybraliśmy okres od 2010 - 2021 roku, gdyż to właśnie ten okres charakteryzuje się danymi które są najbardziej aktualne, a co za tym idzie możemy założyć że ich poprawność oraz sposób pomiarowy jest nowoczesny, dzięki czemuu nie powinny występować większe lub mniejsze braki danych.
+
+```{r Kozienice_mapa, include=TRUE, eval=TRUE}
+
+mapa <- getMeta(site= "KOZIENICE", end.year="current", returnMap=TRUE)
+
+```
+
+Należy pamiętać że pozyskane dane znajdują się w formacie UTF+0 (dane GIOS UTF+1) - na to zwrócimy uwagę w dalszej cześci naszej analizy.
+
+Aby nasze dane mogły zostać z sobą połączone a co za tym idzie żeby ich analiza mogła odbywać się jednocześnie musieliśmy te dane "dostosować" względem siebie. W celu uniknięcie błędu podczas połączenia z sobą tych danych, skorzystaliśmy z poniższej serii poleceń. Postanowiliśmy do przedmiotowych danych "dodać" 1h w celu zrównania ich z danymi na temat jakości powietrza.
+
+```{r normalizacja_danych_meteo, include=TRUE, eval=TRUE}
+
+kozienice <- dane
+kozienice$date <- kozienice$date+3600
+kozienice <-kozienice[c(3,7:14)]
+
+```
+
+Pozyskane dane zostały zapisane jako zmienna w środowisku R.
+
+------------------------------------------------------------------------
+
+## 4.2. Pozyskanie danych GIOS
+
+------------------------------------------------------------------------
+
+Proces pozyskania danych dla stacji GIOS, znajdujących się na terenie wybranego przez nas Radomia rozpoczęliśmy od pobrania na dysk (do określonego wcześniej katalogu dostępu) oraz wczytania metadanych dotyczących stacji jakości powietrza do środowiska programu R.
+
+```{r metadane_stacje, include=TRUE, eval=TRUE}
+
+meta <- gios_metadane(type = "stacje", 
+                      download = F,      #T za pierwsztm razem
+                      path = kat_dost, 
+                      mode = "wb")
+
+
+```
+
+Udało nam się do zleconego katalogu pobrać plik binarny, który następnie został wczytany do danych metadane, z których będziemy korzystać w późniejszym etapie naszej pracy.
+
+Aby odczytać podstawowe informacje o pobranych przez nas danych posłużymy się ramką danych, dzięki niej z łatwością będziemy mogli odczytać informacje o stacjach, takie jak: kod pocztowy, typ, rodzaj oraz lokalizację.
+
+```{r Wyswietl_metadane, include=TRUE, eval=TRUE}
+
+dplyr::glimpse(meta)
+
+```
+
+W celu lepszego zobrazowania rozmieszczenai stacji skorzystaliśmy z funkcji gios_vis, która generuje interaktywną mapę lokalizacji stacji. Każda stacja ma przypisaną etykietę w postaci kodu stacji.
+
+```{r Lokalizacja_stacji_gios, include=TRUE, eval=TRUE}
+
+
+gios_vis(data = meta %>% filter(is.na(data.zamkniecia))) # tylko aktywne stacje
+
+```
+
+Po odpowiednim przybliżeniu możemy zauważyć że wybrane przez nas miejsce posiada na swoim terenie trzy stacje tła miejskiego, znajdująca się blisko stacja meteo upewnia nas tylko w przekonaniu, że wybrana przez nas lokalizacja jest odpowiednia do przeprowadzenia analizy.
+
+Jeżeli wiemy że przedmiotowe stacje znajdują się na terenie miasta przejdźmy teraz do pobrania interesujących nas danych na temat wybranych stacji pomiarowych. Dane te są istostne dla nas, gdyż zawierają informacje o tym jakie substancje są mierzone na każdej z stacji.
+
+```{r stanowiska_gios, include=TRUE, eval=TRUE}
+
+stanowiska <- gios_metadane(type = "stanowiska", 
+                            download = T,  
+                            path = kat_dost, 
+                            mode = "wb")
+
+```
+
+Aby uniknąć problemu wiążącego się z wyodrębnianiem danych, postanowiliśmy je wyodrębnić już na tym etapie naszej pracy, w tym celu skorzystaliśmy z poniższej serii poleceń:
+
+```{r stanowiska_mazowieckie, include=TRUE, eval=TRUE}
+
+stanowiska_mazowieckie <- data.frame(stanowiska %>%
+                                       filter(is.na(data.zamkniecia)) %>%
+                                       filter(wojewodztwo == "MAZOWIECKIE"))
+
+```
+
+Następnie posiadając wyfilrowane dane dla całego województwa mazowieckiego, wyodrębniliśmy z nich dane dotyczące interesującego nas miasta - Radomia.
+
+```{r stanowiska_radom, include=TRUE, eval=TRUE}
+
+stanowiska_radom <- stanowiska_mazowieckie %>% filter(nazwa.strefy == "miasto Radom")
+
+```
+
+Następnym krokiem naszej analizy który postanowiliśmy wykonać było ściągniecię statystyk podstawowych za pomocą funkcji gios_metadane(), W pliku tym znajdują się wszystkie niezbędne miary statystyczne potrzebne nam w późniejszym etapie do przeprowadzenia oceny jakości powietrza w wybranej przez nas stacji. Aby tego dokonać skorzystaliśy z poniższej listy poleceń:
+
+```{r statystyki_podstawowe, include=TRUE, eval=FALSE}
+
+statystyki_podstawowe <- gios_metadane(type = "statystyki", 
+                           download = F, 
+                           path = kat_dost, 
+                           mode = "wb")
+
+```
+
+Funkcję gios_download zastosowaliśmy aby pobrać całą plikową bazę danych przy pomocy jednego polecenia. Zastosowane polecenie pozwoliło pobrać nam archiwum plików z Banku danych lokalnych portalu \<powietrze.gios.gov.pl\>.
+
+Głównymi argumentami funkcji są url oraz rok. Wartości tych argumentów przedstawia poniższa tabela, która jest zapisana w pakiecie jako obiekt zrodlo.
+
+```{r linki_gios, include=TRUE, eval=TRUE}
+
+zrodlo %>% knitr::kable()
+```
+
+Posiadającte informacje możemy przejść do pobrania danych, postanowiliśmy wykonać to w sposób automatyczny, żeby jak najbardziej korzystać z funkcjonalności pakietu giosimport. w tym celu pobraliśmy dane przy pomocy funkcji map2().
+
+Zastosowana poniżej fukcja map2() jest pętlą która wykonuje polecenie dla kolejnych argumentów funkcji gios_downland(). W poniższym przykładzie argumentami funkcji są odpowiednio .x = url, i .y = rok. Czyli za .x podstawiamy listę adresów url, które dostępne są w obiekcie zrodlo[,2], a za .y podstawiamy argument rok, który dostępnmy jest w obiekcie żródlo[,2], pozostałe argumenty są stałe.
+
+```{r Pobranie_danych_gios, include=TRUE, eval=FALSE}
+
+pliki_all <- map2(.x = as.list(zrodlo[,1]), 
+                  .y = as.list(zrodlo[,2]), 
+                  .f = gios_download, 
+                  path = kat_dost,
+                  mode = "wb")
+```
+
+Postanowiliśmy pobrać szerszy przedział danych i następnie go "ręcznie przyciąć" w celu uniknięcia problemów z błędnym indeksowaniem danych.
+
+Zauważyliśmy że dane dla 2020 roku, pobrane w ten sposób są "puste", dlatego postanowiliśmy naprawić to pobierając dane dla tego roku oddzielnie.
+
+```{r pliki_2020, include=TRUE, eval=TRUE}
+
+dane_2020 <- gios_download(url = zrodlo[20,1], 
+                           rok = zrodlo[20,2], 
+                           path = kat_dost, 
+                           mode = "wb")
+
+```
+
+Aby w późniejszym etapie pracy ułatwić sobie korzystanie z danych postanowiliśmy je zindeksować tworząc wektor zawierające nazwy dla całego przedziału.
+
+```{r Indeksowanie_zmiennych_Gios, include=TRUE, eval=TRUE}
+
+
+wek <- 2000:2020 %>% 
+  as.character() %>% 
+  paste0(kat_dost, "/", .)
+
+pliki_all <- map(.x = wek, 
+                 .f = dir)
+
+```
+
+W obiekcie pliki_all znajduje sie lista plików. W celu łatwiejszgo rozróżnienia postanowiliśmy każdy z elementów nadpisać aby łatwiej wyselekcjonować rok który nas interesuje.
+
+```{r indeksowanie_R, include=TRUE, eval=TRUE}
+
+names(pliki_all) <- paste0("R",zrodlo[,2])
+names(pliki_all)
+
+
+```
+
+------------------------------------------------------------------------
+
+# 5. Przygotowanie danych
+
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+
+## 5.1. Selekcja odpowiednich danych
+
+------------------------------------------------------------------------
+
+Przedmiotową analizę rozpoczeliśmy od przypisania nazwy wybranej przez nas stacji jako zmiennej.
+
+```{r przypisanie_kodu_stacji, include=TRUE, eval=TRUE}
+
+kody <- c("MzRadTochter")
+
+```
+
+Pomoże nam to, w dalszej części analizy oszczędzić sobie, czasu oraz maksymalnie uprości pisany przez nas kod, gdyż selekcja danych dla odpowiedniej stacji będzie bardzo intuicyjna.
+
+Naszą analizę rozpoczęliśmy od wyselekcjonowania danych które nas interesują, w tym celu poniższym poleceniem wyselekcjonowaliśmy dane dotyczące pyłu PM10, badanego w okresie 1h. To właśnie te dane posłużą nam jako dalsza część przedmiotowego ćwiczenia. Dane wczytaliśy do przedmiotowego środowiska w następujący sposób:
+
+```{r pomiary_automatyczne, include=TRUE, eval=TRUE}
+
+pm10_1h_2020 <- gios_read(nazwa = "2019_PM10_1g.xlsx",
+                          czas_mu = "1g", 
+                          path = kat_dost)
+
+```
+
+Kiedy mieliśmy już zapisany plik zmiennych, przechowujący informacje na temat interesującego nas zaniczyszczenia powietrza w interwale czasowym równym 1h, postanowiliśmy wyselekcjonować tylko te dane które dotyczą naszej wybranej stacji. W tym celu skorzystlaiśmy z zmiennej którą utworzyliśmy wcześniej aby maksymalnie uczytelnić kod.
+
+```{r przygotowka_pmA_pmM, include=TRUE, eval=TRUE}
+
+pm10_1h <- pm10_1h_2020 %>% filter(kod == kody[1] )
+
+```
+
+Po wyselekcjonowaniu dancyh tylko dla wybranej przez nas stacji, postanowiliśmy przedmiotowe dane (pozyskane z GIOS oraz bazy NOAA) połączyć z sobą. Działanie takie w znaczym stopniu ułatw nam pracę gdyż będziemy operować na mniejszej liczbie zmiennych co zniweluje szansę pojawienia się jakiego kolwiek błędu.
+
+Dane zostały połączone w następujący sposób:
+
+```{r polaczenie_danych_NOAA_GIOS, include=TRUE, eval=TRUE}
+
+polaczone <- inner_join(kozienice, pm10_1h , by = "date")
+dane<- polaczone
+# Sprawdzenie braków danych i poszczególnych kolumn
+summary(dane)
+
+```
+
+Jednak jak możemy zauważyć pozysakne dane zawieraja w sobie wiele braków oznaczonych jako NA's. Aby nasza analiza była jak najabrdziej dokładna postanowiliśmy skorzystać tylko zwierszy zawierajacych kompletne informacje.
+
+```{r kompletne_wiersze, include=TRUE, eval=TRUE}
+
+# Selekcja tylko kompletnych wierszy
+dane_rf <- dane[complete.cases(dane),]
+
+```
+
+------------------------------------------------------------------------
+
+## 5.2. Budowa zmiennej
+
+------------------------------------------------------------------------
+
+Analizując powyższy kod możemy zauważyć pewną nieścisłość. Wykonany przez nas do tej pory kod zawierał tylko dane dla roku 2019. Jest to zdecydowanie za mała ilość danych żeby w sposób sensowny badać predykcję modeli.
+
+Znając już powyższy proces utworzenia zmiennych, postanwoiliśy w sposób analogiczny utworzyć zmienną zawierającą informacje o danych dla wybranej stacji w Radomiu dla całego okresu jej pracy.
+
+Przedmiotowy proces przygotowania danych wykonaliśmy w sposób analoiczny jak ten przytoczony powyżej, dlatego teraz wykonamy go w sposób skrócony. Zdecydowaliśy się na taką formę prezentacji naszych krokóW gdyż uznaliśmy, że przedstawienie przypisania pojedycznych zmiennych może być dla potencjalnego odbiorcy łatwiejsze do rpzyswojenia niż analogicznasytuacja wykonana na pętlach zbudowanych w oparciu o wtyczkę GIOS import.
+
+Selekcje pyłu PM10 dla wybranej przez nas stacji w długim interwale czasowym prezentuje poniższy ciąg poleceń. Ponownie skorzystaliśmy z danych 1h gdyż uznaliśmy że będą one najlepszą bazą do ewentualnego uśredniania wyników.
+
+```{r utworzenie_zmiennej_z_danymi, include=TRUE, eval=TRUE}
+
+#inne
+inp_pm10_1 <- map(.x = pliki_all,
+                  .f = ~ .[str_detect(., pattern = "PM10_1g")]) %>%
+  flatten_chr()
+
+PM10 <- map_df(.x = inp_pm10_1,
+               .f = gios_read,
+               czas_mu = "1g",
+               path = kat_dost)
+PM10 <- gios_kody(data = PM10, meta = meta)
+
+unique(PM10$kod) %>% .[str_detect(., "MzRad")]
+Radom <- PM10 %>% filter(kod == "MzRadTochter")
+
+```
+
+------------------------------------------------------------------------
+
+## 5.3. Kompletność obserwacji
+
+------------------------------------------------------------------------
+
+Sprawdźmy teraz kompltność uzyskanych danych zgodnie z ilością oberwacji w pełnym okresie.
+
+Aby zaprezentować to sposób graficzny skorzystaliśmyz funkcji timePlot, budując wykres w oparciu o opserwacje w danym dniu.
+
+```{r time_plot_obs, include=TRUE, eval=TRUE}
+
+timePlot(Radom, pollutant = "obs", avg.time = "day")
+
+```
+
+Jak możemy zauważyć na powyższym wykresie nasze dane pomimo szerokiego zakresu czasu charakteryzują się ilością obserwacji na podobnym poziomie. Widoczne odchylenie od normy możemy zauważyć w okolicach 2006 roku.
+
+Uznaliśmy że ta odbiegajaca wartość nie koniecznie jest błędem - bardzo prawdopodobne że w tamtym okresie wydarzyło się coś co spodowało wzrost liczby osberwacji, np wymiana sprzętu w stacji lub inne zjawisko klimatyczne. Postanowiliśmy wykorzystać tą wartość gdyż finalnie może dzięki niej otrzymamy "ciekawy efekt" budowy naszych modeli.
+
+------------------------------------------------------------------------
+
+## 5.4. Złączenie danych
+
+------------------------------------------------------------------------
+
+Otrzymane dane na temat zanieczyszczenia połączyliśmy w sposób analogiczny z danymi dotyczącymi pogody w danym okresie.
+
+```{r laczenie, include=TRUE, eval=TRUE}
+
+#laczenie "air_temp", avg.time = "day")
+
+```
+
+Jak widzimy na powyższym wykresie rozkład temperatury w danych latach charakteryzuje się identycznym rozkładem. Co prawda widzimy nieznaczne różnice w wartościach maksymalnych bądź minimalnych jednak kształt a co za tym idzie przebieg temperatury w skali roku jest zachowany.
+
+Możemy wyróżnić minimalną ale widoczną tendencję wzrostową dla temperatury na badanej przez nas stacji.
+
+postanowiliśmy "okroić" naszą zmienną wybierając tylko te zmienne, które realnie przydadzą nam się w naszej analizie, uznaliśy że przyśpieszy to przebieg naszej analizy oraz ułatwi nam pracę.
+
+```{r orkojenie_zmiennej, include=TRUE, eval=TRUE}
+
+Radom2 <- Radom %>%
+  select(date, obs, ws, air_temp, dew_point, atmos_pres, RH, visibility)
+
+```
+
+------------------------------------------------------------------------
+
+## 5.5. Uśrednianie danych
+
+------------------------------------------------------------------------
+
+Uśrednianie danych było kolejnym etapem naszej analizy który postanowiliśmy wykonać. W tym celu wykonaliśmy poniższy szereg poleceń, który miał za zadanie uśrednić utworzone przez nas modele do zadanych w poleceniu okresów czasowych.
+
+```{r usrednainie_danych, include=TRUE, eval=TRUE}
+
+#usrednianie danych
+Radom_m <- Radom2 %>%  timeAverage(avg.time = "month")
+Radom_m2 <- Radom2 %>%  timeAverage(avg.time = "month")
+Radom_m2<- Radom_m2 %>% selectByDate(year= 2004:2019)
+Radom_m <- Radom_m %>% selectByDate(year= 2004:2019)
+Radom_d <- Radom2 %>%  timeAverage(avg.time = "day")
+Radom_w <- Radom2 %>%  timeAverage(avg.time = "week")
+
+```
+
+Po wykonaniu uśredniania zgodnie z powyższymi parametrami nadpiszmy nasze zmienne korzystając z biblioteki tsibble.
+
+```{r tsibble, include=TRUE, eval=TRUE}
+
+Radom_d <- Radom_d %>%
+  mutate(date = ymd(date)) %>%
+  as_tsibble(index = date)
+
+Radom_m <- Radom_m %>%
+  mutate(date = yearmonth(date)) %>%
+  as_tsibble(index = date)
+
+```
+
+------------------------------------------------------------------------
+
+# 6. Analiza danych
+
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+
+## 6.1. Wykres czasu (time plot)
+
+------------------------------------------------------------------------
+
+Prezentacje otrzymanych dan
+
+```{r Radom_autoplot, include=TRUE, eval=TRUE}
+
+Radom_m %>% autoplot()
+
+```
+
+```{r ggplot_radom_m, include=TRUE, eval=TRUE}
+
+ggplot(data = Radom_m, aes(x= date, y=obs))+
+  geom_line()
+
+```
+
+------------------------------------------------------------------------
+
+## 6.2. Wykresy sezonowe
+
+------------------------------------------------------------------------
+
+```{r gg_season_1, include=TRUE, eval=TRUE}
+
+gg_season(Radom_m,obs)
+
+```
+
+```{r gg_season_2, include=TRUE, eval=TRUE}
+
+gg_season(Radom_m,obs, polar = T)
+
+```
+
+```{r radom_m_gather, include=TRUE, eval=TRUE}
+
+Radom_m %>%
+  gather(key = "param", value = "obserwacje", obs:visibility) %>%
+  gg_season()
+
+```
+
+------------------------------------------------------------------------
+
+## 6.3. Wykresy sezonowych pod serii
+
+------------------------------------------------------------------------
+
+```{r gg_subseries_year, include=TRUE, eval=TRUE}
+
+gg_subseries(Radom_m, obs, period = "year")
+
+```
+
+```{r gg_subseries_month, include=TRUE, eval=TRUE}
+
+gg_subseries(Radom_m, obs, period = "month")
+
+```
+
+```{r Radom_subseries, include=TRUE, eval=TRUE}
+
+Radom_m %>% gg_subseries()
+
+```
+
+------------------------------------------------------------------------
+
+## 6.4. Wykres rozrzutu
+
+------------------------------------------------------------------------
+
+```{r Radom_gather_subseries, include=TRUE, eval=TRUE}
+
+Radom_m %>%
+  gather(key = "param", value = "obserwacje", obs:visibility) %>%
+  gg_subseries()
+
+```
+
+```{r Radom_ggplot, include=TRUE, eval=TRUE}
+
+Radom_m %>%
+  ggplot(aes(x = obs, y = ws)) +
+  geom_point() +
+  theme_bw()
+
+```
+
+```{r Radom_filter_autoplot, include=TRUE, eval=TRUE}
+
+Radom_m %>% filter(year(date)==2004) %>% autoplot(obs)
+
+```
+
+```{r Radom_filter_autoplot_2, include=TRUE, eval=TRUE}
+
+Radom_m %>% filter(year(date)==2019) %>% autoplot(obs)
+
+```
+
+```{r ggplot_filter_1, include=TRUE, eval=TRUE}
+
+ggplot(data = Radom_m %>% filter(year(date)==2019) %>% as.data.frame(),
+       aes(air_temp, obs))+
+  geom_point()+
+  geom_smooth()
+  
+```
+
+```{r ggplot_rad_2, include=TRUE, eval=TRUE}
+
+ggplot(data = Radom_m %>% as.data.frame(),
+       aes(air_temp, obs))+
+  geom_point()+
+  geom_smooth()
+
+```
+
+```{r cor, include=TRUE, eval=TRUE}
+
+cor(Radom_m["obs"], Radom_m["air_temp"], method ="p")
+
+```
+
+------------------------------------------------------------------------
+
+## 6.5. Wykres opóźnień
+
+------------------------------------------------------------------------
+
+```{r gg_lag, include=TRUE, eval=TRUE}
+
+Radom_m %>% gg_lag(obs, geom="point")
+
+```
+
+```{r Radom_gather_2, include=TRUE, eval=TRUE}
+
+Radom_m %>%
+  gather(key = "param", value = "obserwacje", obs:visibility) %>%
+  ggplot(aes(x = date, y = obserwacje)) +
+  geom_line() +
+  facet_wrap(~param, scales = "free_y", ncol = 1)
+
+```
+
+------------------------------------------------------------------------
+
+## 6.6. Autokorelacja
+
+------------------------------------------------------------------------
+
+```{r autokorelacja_1, include=TRUE, eval=TRUE}
+
+#autokorelacja
+Radom_m %>% ACF(obs) %>% autoplot()
+
+```
+
+```{r autokorelacja_2, include=TRUE, eval=TRUE}
+
+Radom_m %>% ACF(obs, lag_max= 180) %>% autoplot()
+
+```
+
+------------------------------------------------------------------------
+
+## 6.7. Biały szum
+
+------------------------------------------------------------------------
+
+```{r szum_1, include=TRUE, eval=TRUE}
+
+#seria nie jest bialym szumem poniewaz skoki znajduja sie nad niebieska linia
+year(Radom_m$date)
+
+```
+
+```{r szum_2, include=TRUE, eval=TRUE}
+
+Radom_m %>% features(obs, list(mean = mean)) %>%
+  arrange(mean)
+
+```
+
+------------------------------------------------------------------------
+
+## 6.8. Proste statystyki
+
+------------------------------------------------------------------------
+
+```{r wiele_statystyk, include=TRUE, eval=TRUE}
+
+# 4.1. Proste statystyki --------------------------------------------------
+
+# Wiele statystyk z nazwą (list)
+Radom_m %>% 
+  features(obs, 
+           list(mean = mean, 
+                median = median)) %>% #milego dnia
+  arrange(desc(mean))
+
+```
+
+```{r Funkcja_z_dodatkowymi_parametrami, include=TRUE, eval=TRUE}
+
+# funkcja z dodotkowymi parametrami
+Radom_m %>% 
+  features(obs, quantile, probs = seq(0, 1, by = 0.25))
+
+```
+
+------------------------------------------------------------------------
+
+## 6.9. Funkcje ACF
+
+------------------------------------------------------------------------
+
+```{r ACF, include=TRUE, eval=TRUE}
+
+# 4.2. Funckje ACF --------------------------------------------------------
+
+Radom_m %>% 
+  features(obs, feat_acf) # domyślnie lag = 10
+
+# Funkcja zwrac 6 lub 7 wyników
+# - wartość autokorelacji dla pierwotnych danych;
+# - suma kwadratu pierwszych dziesięciu współ. autokorelacji z pierwotnych
+# danych;
+# - pierwszy współ. autokorelacji z różnicowanych danych (druga minus pierwsza,
+# trzecia minu druga itd.);
+# - suma kwadratu pierwszych dziesięciu współ. autokorelacji z różnicowanych
+# danych
+# - różnice sezonowe pomiędzy kolejnymi zmiennymi (np, różnice miedzy kolejnymi
+# stycznniami, itd..)
+# - pierwszy współ. autokorelacji z podwójnie zróżnicowanych danych;
+# - suma kwadratu pierwszych dziesięciu współ. autokorelacji z podwójnie
+# zróżnicowanych danych;
+# - W przypadku danych sezonowych zwracany jest również współczynnik
+# autokorelacji przy pierwszym sezonowym opóźnieniu
+
+```
+
+------------------------------------------------------------------------
+
+## 6.10. Funkcje STL
+
+------------------------------------------------------------------------
+
+```{r STL, include=TRUE, eval=TRUE}
+
+# 4.3. Funkcje STL --------------------------------------------------------
+
+#  obliczenia siły trendu i sezonowości
+
+Radom_m %>% 
+  features(obs, feat_stl) -> sila_kompnentow_obs
+
+Radom_m %>% 
+  features(air_temp, feat_stl) -> sila_kompnentow_air_temp
+
+Radom_m %>% 
+  features(dew_point, feat_stl) -> sila_kompnentow_dew_point
+
+Radom_m %>% 
+  features(atmos_pres, feat_stl) -> sila_kompnentow_atmos_pres
+
+ Radom_m %>% 
+  features(RH, feat_stl) -> sila_kompnentow_RM
+
+Radom_m %>% 
+  features(visibility, feat_stl) -> sila_kompnentow_visibility
+
+
+```
+
+```{r Wyświetl_sile_komponentow, include=TRUE, eval=TRUE}
+
+sila_kompnentow_obs
+sila_kompnentow_air_temp
+sila_kompnentow_dew_point
+sila_kompnentow_atmos_pres
+sila_kompnentow_RM
+sila_kompnentow_visibility
+
+```
+
+------------------------------------------------------------------------
+
+## 6.11. Przykładowa analiza
+
+------------------------------------------------------------------------
+
+```{r out, include=TRUE, eval=TRUE}
+
+# 4.5. Przykład -----------------------------------------------------------
+
+# Wszystkie funkcje zawarte w feastspakiecie można obliczyć w jednym wierszu
+# takim jak ten.
+
+out <- Radom_m %>%
+  features(obs, feature_set(pkgs="feasts"))
+
+out
+
+
+```
+
+```{r okreslenie_trendu, include=TRUE, eval=TRUE}
+
+# Daje to 47 funkcji dla każdej kombinacji trzech kluczowych zmiennych ( Region,
+# Statei Purpose).
+
+#okreslic trend
+Radom_m %>%
+  autoplot(obs) + 
+  labs(title = "Obserwacje w wybranych latach", y = "obs")+
+  facet_wrap(~year(date), scales = 'free')
+
+```
+
+```{r model_regresji_prostej, include=TRUE, eval=TRUE}
+
+## c) Zdefiniuj model regresji liniowej prostej (dopasowanie) ------------#
+
+TSLM(obs ~ trend())
+
+```
+
+```{r fit, include=TRUE, eval=TRUE}
+
+# `TSLM()` <- model liniowy szeregów czasowych
+# `GDP ~ trend()` - formuła y ~ x
+# `trend()` - funkcja estymująca trend liniowy
+
+## d) Estymacja parametrów modelu (Wytrenuj model) -----------------------#
+
+fit <- Radom_m %>%
+  model(trend_model = TSLM(obs ~ trend()))
+
+# Oszacowano wiele modeli trendu dla każdego kraju. Funkcja buduje osobni model
+# dla każdego szeregu czasowego. Mamy wiele szeregów czasowych.
+
+fit
+
+```
+
+```{r fit_prognoza, include=TRUE, eval=TRUE}
+
+## d) Dokonaj oceny modelu - o tym później -------------------------------#
+
+# Póżniej
+
+# e) Wykonaj prognozy ----------------------------------------------------#
+
+# Na przykład można wygenerować prognozy dla następnych 10 obserwacji h = 10.
+# Możemy również używać języka naturalnego; np. h = "2 years"można go
+# wykorzystać do przewidywania dwóch lat w przyszłość.
+
+fit %>% 
+  forecast(h = "3 years")
+
+```
+
+```{r fit_fore_cast_1, include=TRUE, eval=TRUE}
+
+
+# `GDP` zawiera prognozę punktową, natomiast `.distribution` kolumna zawiera
+# przewidywany rozkład. Prognoza punktowa jest średnią
+
+fit %>% 
+  forecast(h = "1 years") %>% 
+  autoplot(Radom_m) + 
+  labs(title = "Prognoza obs w Radomiu", y = "PM10 [jakas jednostka]")
+
+```
+
+```{r fit_forecast_2, include=TRUE, eval=TRUE}
+
+fit %>% 
+  forecast(h = "1 month") %>% 
+  autoplot(Radom_m) + 
+  labs(title = "Prognoza obs w Radomiu", y = "PM10 [jakas jednostka]")
+
+
+```
+
+```{r fit_3, include=TRUE, eval=TRUE}
+
+
+
+fit %>% 
+  forecast(h = "100 years") %>% 
+  autoplot(Radom_m) + 
+  labs(title = "Prognoza obs w Radomiu", y = "PM10 [jakas jednostka]")
+
+
+```
+
+------------------------------------------------------------------------
+
+## 6.12. Metody prognozowania
+
+------------------------------------------------------------------------
+
+```{r cegla, include=TRUE, eval=TRUE}
+
+# 5.2. Niektóre proste metody prognozowania -------------------------------
+
+# dane o produkcji cegły w australii 
+
+wybrane <- Radom_m %>%
+  select(obs) 
+
+```
+
+```{r metoda_sredniej, include=TRUE, eval=TRUE}
+
+# Poniżej przedstawimy krótką prezentację 4 podstawowych i bardzo prostych
+# metody prognozowania, które bywaja często skuteczne i wystarczające.
+
+# **Metoda średniej** - prognozy przyszłych wartości są równe wartości średniej
+# z danych historycznych
+
+m1 <- wybrane %>% model(MEAN(obs)) ; m1
+
+```
+
+```{r metoda_naive, include=TRUE, eval=TRUE}
+
+# **Metoda Naiwne (prosta)** - 'Naiwne' ponieważ zakłądają, że czynniki określające
+# zmienną prognozowaną są stałe (niezmienne). Prognozą jest wartość ostatniej
+# obserwacji. Tak zwane prognozy losowego marszu.
+
+m2 <- wybrane %>% model(NAIVE(obs)) ; m2
+
+```
+
+```{r naiwna_sezonowa, include=TRUE, eval=TRUE}
+
+# **Metoda naiwna (sozenowa)** - prognoza jest równan ostatniej obserwacji z
+# każdego sezonu (pory roku, miesiaca, tygodnia itd..)
+
+m3 <- wybrane %>% model(SNAIVE(obs ~ lag("year")))
+
+ # lag - definiuje długość okresu sezonowego
+
+```
+
+```{r metoda_dryfu, include=TRUE, eval=TRUE}
+
+# **Metaoda dryfu (naiwna)** -  prognozy mogą rosnąć lub maleć z czasem, przy
+# czym zmianan ta jest średnią zmianą danych historycznych.
+
+m4 <- wybrane %>% model(RW(obs ~ drift()))
+
+```
+
+```{r wyniki_prognoz, include=TRUE, eval=TRUE}
+
+# wyniki prognoz
+
+gridExtra::grid.arrange(m1 %>% forecast() %>% autoplot(wybrane) + ggtitle("MEAN"),
+                        m2 %>% forecast() %>% autoplot(wybrane) + ggtitle("NAIVE"),
+                        m3 %>% forecast() %>% autoplot(wybrane) + ggtitle("SNAIVE"),
+                        m4 %>% forecast() %>% autoplot(wybrane) + ggtitle("RW"))
+
+```
+
+```{r zestaw_danych_treningowych, include=TRUE, eval=TRUE}
+
+# zestaw danych treningowych
+train <- Radom_m %>% filter(year(date)>=2004 & year(date) <= 2017)
+test <- Radom_m %>% filter(year(date)>=2018 & year(date) <= 2019)
+
+```
+
+```{r dopasowanie_modeli, include=TRUE, eval=TRUE}
+
+# dopasowanie modeli 
+fit <- train %>% 
+  model(Mean = MEAN(obs),
+        Nive = NAIVE(obs),
+        Snaive = SNAIVE(obs),
+        Drift = NAIVE(obs ~ drift()))
+
+fit %>% tidy()
+
+```
+
+```{r Prognoza_12, include=TRUE, eval=TRUE}
+
+# Prognoza 12
+fc <- fit %>% forecast(h = 12) #moze energetyk?
+
+```
+
+```{r forecast_Pm, include=TRUE, eval=TRUE}
+
+# Plot
+
+fc %>%
+  autoplot(train, level = NULL) +                       # train + prog
+  ggtitle("Forecasts for PM10 obs") +
+  xlab("Year") + ylab("PM10") +
+  guides(colour=guide_legend(title="Forecast")) +
+  autolayer(test, color = "yellow", size = 0.4)         # test data
+
+#ktora prognoza wydaje sie najlepsza
+
+# Powyższe prognozy mogą być jednymi z najlepszych, które można osiągnąć, ale z
+# reguły stanowią one punkt odniesienia w stosunku do kolejnych zaawansowanych
+# metod, w celu zweryfikowania, że uzyskano lepsze wyniki dla nowych metod.
+
+```
+
+------------------------------------------------------------------------
+
+## 6.13. Reszty
+
+------------------------------------------------------------------------
+
+```{r Reszty, include=TRUE, eval=TRUE}
+
+# 5.4. Reszty -------------------------------------------------------------
+
+# a) Reszty są nieskorelowane. Jeśli istnieją korelacje między resztami, to w
+# resztkach pozostały informacje, które należy wykorzystać w obliczeniach
+# prognoz.
+
+# b) Reszty mają średnią zero. Jeśli reszty mają średnią inną niż zero,
+# wówczas prognozy są tendencyjne.
+
+# Jeślie ww. warunki nie są spełnione, to teoretycznie model można udoskonalić.
+# Spełnienie powyższych warunków nie oznacza, że nie można ulepszyć prognoz.
+# Wiele metod dla jednego zestawu danych może spełniać ww. kryteria
+
+# a) Korekta Ochylenia - dodaj poprastu wartość ochylenia do prognoz
+# b) autokorelacja, to trudniejsza sprawa. 
+
+# Ponadto:
+
+# c) reszty mają jednorodną wariancję (testy statystyczne)
+# d) reszty mają rozkład normlany (testy statystyczne). 
+
+
+# PRZYKŁAD I #reszty dla 2019
+
+# wizualizacj danych 
+Radom_2019 <- Radom_m %>% 
+  filter(year(date) == 2019)
+
+Radom_2019 %>% 
+  autoplot(obs) +
+  labs(x = "Cena zamknięcia akcji (US$)", 
+       title = "Akcje firmy Google w 2015 r") 
+
+
+```
+
+```{r wartosci_dopasowane, include=TRUE, eval=TRUE}
+
+
+# Pozyskanie wartości dopasowany i reszt
+fit_res <- Radom_2019 %>% 
+  model(NAIVE(obs)) %>% 
+  augment()
+
+
+```
+
+```{r wizualizacja_reszt_modelu_1, include=TRUE, eval=TRUE}
+
+# wizualizacja reszt modelu:
+#jak wariancja jednorodna to nie ma duzych odchylen
+fit_res %>% 
+  autoplot(.resid)
+
+```
+
+```{r fit_res_gistogram, include=TRUE, eval=TRUE}
+
+fit_res %>% 
+  ggpubr::gghistogram('.resid')
+
+```
+
+```{r fit_res_ACF, include=TRUE, eval=TRUE}
+
+fit_res %>% 
+  ACF(.resid) %>% 
+  autoplot()
+
+```
+
+```{r Naive_plot, include=TRUE, eval=TRUE}
+
+Radom_2019 %>% #jestes super
+  model(NAIVE(obs)) %>% 
+  gg_tsresiduals()
+
+```
+
+```{r dopasowanie_danych_2, include=TRUE, eval=TRUE}
+
+# PRZYKŁAD II #reszty dla calego okresu czasowego
+
+# wizualizacj danych 
+
+Radom_m%>% 
+  autoplot(obs) +
+  labs(x = "Cena zamknięcia akcji (US$)", 
+       title = "Akcje firmy Google w 2015 r") 
+
+```
+
+```{r Dopasowanie_reszty, include=TRUE, eval=TRUE}
+
+# Pozyskanie wartości dopasowany i reszt
+fit_res <- Radom_m %>% 
+  model(NAIVE(obs)) %>% 
+  augment()
+
+```
+
+```{r wizualizacja_reszt_modelu_2, include=TRUE, eval=TRUE}
+
+# wizualizacja reszt modelu:
+#jak wariancja jednorodna to nie ma duzych odchylen
+fit_res %>% 
+  autoplot(.resid)
+
+```
+
+```{r histogram_2, include=TRUE, eval=TRUE}
+
+fit_res %>% 
+  ggpubr::gghistogram('.resid')
+
+```
+
+```{r ACF_reszty, include=TRUE, eval=TRUE}
+
+fit_res %>% 
+  ACF(.resid) %>% 
+  autoplot()
+
+```
+
+```{r Naive_2, include=TRUE, eval=TRUE}
+
+Radom_m %>% 
+  model(NAIVE(obs)) %>% 
+  gg_tsresiduals()
+
+
+# Naiwna metoda tworzy prognozy, które chyba uwzględniają wszystkie dostępne informacje. 
+# Średnia reszt jest bliska zeru (0.69) nie ma znaczącej korelacji w szeregach reszt. 
+# Wiarnacje są raczje jednorodne (jedna wartości odstająca).# Reszty mogą nie być normalne:
+
+```
+
+```{r Test_shapiro_Wilka, include=TRUE, eval=TRUE}
+
+shapiro.test(fit_res$.resid) 
+
+# p < 0.05 - # Reszty nie są normlane. Potwierdza to również ponizsyz wykres.
+
+```
+
+```{r car_plot, include=TRUE, eval=TRUE}
+
+car::qqPlot(fit_res$.resid)
+
+
+# Prognozy będą prawdopodobnie całkiem dobre, ale przedziały prognoz, które są
+# obliczane przy założeniu rozkładu normalnego, mogą być niedokładne.
+
+# Test autokorelacji, traktuje wszystkie wartości autokorelacji jako grupę, a
+# nie sprawdza indywidualnie każdą wartość ja na wykresie ACF
+
+```
+
+```{r _fit_res_dof, include=TRUE, eval=TRUE}
+
+# stosowaliśmy metodę naivną więc K = 0 (dof = 0), oznacza brak parametrów modelu.
+
+fit_res %>% 
+  features(.resid, box_pierce, lag = 10, dof = 0)
+
+```
+
+```{r fit_res_dof2, include=TRUE, eval=TRUE}
+
+fit_res %>% 
+  features(.resid, ljung_box, lag = 10, dof = 0)
+
+# Odrzucamy hipotezę alternatywną o autokorelacji reszt. Podrzymujemy hipotezę
+# zerową, że reszty nie są z sobą skorelowane (pvalu > 0.05)
+
+```
+
+```{r naiwna_dryfu, include=TRUE, eval=TRUE}
+
+# Można zastosowac metodę naivwną dryfu z parametrem dryfu.
+# estymacja parametrów modelu: 
+
+fit <- Radom_2019 %>% model(RW(obs~drift()))
+
+# podglad parametrów modelu:
+
+fit %>% tidy()
+
+```
+
+```{r test_autokorelacji, include=TRUE, eval=TRUE}
+
+# test autokorealcji, 
+fit %>% 
+  augment() %>% 
+  features(.resid, ljung_box, lag = 10, dof = 1) #ej mordo tutaj chyba odrzucamy hipoteze zerowa, czyli reszty sa ze soba skorelowane
+
+# Odrzucamy hipotezę alternatywną o autokorelacji reszt. Podrzymujemy hipotezę
+# zerową, że reszty nie są z sobą skorelowane (pvalu > 0.05)
+
+```
+
+------------------------------------------------------------------------
+
+## 6.14. Przedziały ufności
+
+------------------------------------------------------------------------
+
+```{r przedziały_ufnosci1, include=TRUE, eval=TRUE}
+
+# 5.5. Przedziały ufności -------------------------------------------------
+
+# Jeśli tworzymy prognozy bez przedizału ufności, nie ma sposobu, aby
+# powiedzieć, jak dokładne są prognozy. Jeśli jednak produkujemy również
+# przedziały prognozowania, jasne jest, ile niepewności wiąże się z każdą
+# prognozą. Z tego powodu prognozy punktowe mogą nie mieć prawie żadnej wartości
+# bez towarzyszących im przedziałów prognoz.
+
+# o technikach wyznaczania przedziałów rozmawaliśmy już. W przypadku stosowania
+# opisanych uprzednio metod prognozowania przeduiały ufności wyznacza się za
+# pomocą funkcji hilo.
+
+Radom_2019 %>% 
+  model(NAIVE(obs)) %>% 
+  forecast(h = 12) %>% 
+  hilo()
+
+# Ta `hilo()` funkcja przekształca rozkłady prognoz w przedziały. Domyślnie
+# zwracane są przedziały predykcji 80% i 95%, chociaż możliwe są inne opcje za
+# pomocą argumentu `level`.
+
+```
+
+```{r Przedziały_ufnosci2, include=TRUE, eval=TRUE}
+
+
+Radom_m %>% 
+  model(NAIVE(obs)) %>% 
+  forecast(h = 12) %>% 
+  autoplot(Radom_m)
+
+```
+
+```{r Przedziały_ufnosci3, include=TRUE, eval=TRUE}
+#jak nie mamy cos tam ufnosci do reszt to mozemy zrobic boostrapem nieparametrycznym
+# Przedziały nieparametryczne
+
+fit <- Radom_m %>% 
+  model(NAIVE(obs))
+#normalnie trzeba 1000 #ale przy 1000 to na wykresie jest sama legenda wiec potem XD
+sim <- fit %>% generate(h = 30, times = 20, bootstrap = T)
+
+# Oboekt sim zawiera 5 różnych prognoz 30 kroków do przodu:
+
+ggplot(Radom_m, aes(x = year(date) ,y = obs)) +
+  geom_line() +
+  geom_line(data = sim, aes(y = .sim, 
+                            colour = factor(.rep)))
+
+```
+
+```{r przedziały_ufnosci4, include=TRUE, eval=TRUE, include=TRUE, eval=TRUE}
+ 
+# Funkcje `generate()` można pominąć, bo jest wbudowana w funkcje forecast:
+# trochę to potrwa, bo liczy 200 możliwych scenariuszy w opraciu o technikę bootstrap. 
+fc <- fit %>% 
+  forecast(h = 30, bootstrap = T, times = 1000) 
+# wykres
+fc %>% 
+  autoplot(Radom_m)
+
+
+```
+
+```{r testowanie_kodu, include=FALSE, eval=FALSE}
+
+```
